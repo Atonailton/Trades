@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entrerium - Robô Cripto</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <!-- Dependências do Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.0/dist/chartjs-adapter-moment.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@1.2.0/dist/chartjs-chart-financial.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <style>
+    body {
+      background-color: #f7fafc;
+      font-family: Arial, sans-serif;
+    }
+    #graficoChart {
+      max-height: 500px;
+      width: 100%;
+      border: 1px solid #e2e8f0;
+    }
+    #graficoSpinner {
+      display: none;
+      text-align: center;
+      padding: 20px;
+    }
+    #graficoError {
+      display: none;
+      color: red;
+      text-align: center;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="text-3xl font-bold text-center mb-6">Entrerium - Robô Cripto</h1>
+    <div class="bg-white p-6 rounded-lg shadow-md">
+      <div id="graficoSpinner">
+        <svg class="animate-spin h-8 w-8 mx-auto text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+      </div>
+      <div id="graficoError"></div>
+      <canvas id="graficoChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // Registra os componentes do Chart.js
+    Chart.register(
+      ChartFinancial.CandlestickController,
+      ChartFinancial.CandlestickElement,
+      ChartFinancial.OhlcController,
+      ChartFinancial.OhlcElement,
+      ChartAnnotation.registerables
+    );
+
+    let chartInstance = null;
+
+    // Função para buscar dados da API CoinGecko
+    async function fetchCandles() {
+      try {
+        const response = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=1');
+        if (!response.ok) {
+          throw new Error(`Erro na API: ${response.status}`);
+        }
+        const data = await response.json();
+        return data.map(([time, open, high, low, close]) => ({
+          time,
+          open,
+          high,
+          low,
+          close
+        }));
+      } catch (e) {
+        console.error("Erro ao buscar dados da API:", e);
+        throw e;
+      }
+    }
+
+    // Função para atualizar o gráfico
+    function atualizarGrafico(candles, orderBlocks = [], poc = [], moeda = 'USD') {
+      const canvas = document.getElementById("graficoChart");
+      const spinner = document.getElementById("graficoSpinner");
+      const errorDiv = document.getElementById("graficoError");
+
+      spinner.style.display = "block";
+      errorDiv.style.display = "none";
+
+      try {
+        if (!window.Chart) {
+          throw new Error("Chart.js não carregado.");
+        }
+        if (chartInstance) {
+          chartInstance.destroy();
+        }
+
+        // Dados do gráfico
+        const data = {
+          datasets: [{
+            label: `Preço (${moeda})`,
+            data: candles.map(candle => ({
+              t: new Date(candle.time),
+              o: candle.open,
+              h: candle.high,
+              l: candle.low,
+              c: candle.close
+            }))
+          }]
+        };
+
+        // Anotações (order blocks e POC)
+        const annotations = [];
+        orderBlocks.forEach((block, index) => {
+          annotations.push({
+            type: 'box',
+            xMin: new Date(block.startTime),
+            xMax: new Date(block.endTime),
+            yMin: block.low,
+            yMax: block.high,
+            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+            borderColor: 'rgba(255, 99, 132, 1)',
+            borderWidth: 1,
+            label: {
+              content: `OB ${index + 1}`,
+              enabled: true
+            }
+          });
+        });
+        poc.forEach((point, index) => {
+          annotations.push({
+            type: 'line',
+            xMin: new Date(point.time),
+            xMax: new Date(point.time),
+            yMin: point.price,
+            yMax: point.price,
+            borderColor: 'rgba(0, 255, 0, 1)',
+            borderWidth: 2,
+            label: {
+              content: `POC ${index + 1}`,
+              enabled: true
+            }
+          });
+        });
+
+        // Configuração do gráfico
+        chartInstance = new Chart(canvas, {
+          type: 'candlestick',
+          data: data,
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                type: 'time',
+                time: {
+                  unit: 'hour',
+                  tooltipFormat: 'DD/MM/YYYY HH:mm',
+                  displayFormats: {
+                    hour: 'DD/MM HH:mm'
+                  }
+                },
+                title: {
+                  display: true,
+                  text: 'Data/Hora'
+                }
+              },
+              y: {
+                title: {
+                  display: true,
+                  text: `Preço (${moeda})`
+                },
+                beginAtZero: false
+              }
+            },
+            plugins: {
+              annotation: {
+                annotations: annotations
+              },
+              legend: {
+                display: true
+              },
+              tooltip: {
+                enabled: true,
+                callbacks: {
+                  label: function(context) {
+                    const data = context.raw;
+                    return `Open: ${data.o} | High: ${data.h} | Low: ${data.l} | Close: ${data.c}`;
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        spinner.style.display = "none";
+      } catch (e) {
+        console.error("Erro ao renderizar gráfico:", e);
+        spinner.style.display = "none";
+        errorDiv.style.display = "block";
+        errorDiv.textContent = "Erro: Falha ao carregar gráfico. Verifique o console.";
+      }
+    }
+
+    // Função para atualizar tudo
+    async function atualizarTudo() {
+      try {
+        const candles = await fetchCandles();
+        if (!candles || candles.length === 0) {
+          throw new Error("Nenhum dado de candles retornado");
+        }
+        // Exemplo de order blocks e POC (substitua pela sua lógica)
+        const orderBlocks = [
+          { startTime: Date.now() - 3 * 60 * 60 * 1000, endTime: Date.now() - 2 * 60 * 60 * 1000, low: 49000, high: 51000 }
+        ];
+        const poc = [
+          { time: Date.now() - 2 * 60 * 60 * 1000, price: 50000 }
+        ];
+        atualizarGrafico(candles, orderBlocks, poc, 'USD');
+      } catch (e) {
+        console.error("Erro ao atualizar tudo:", e);
+        const errorDiv = document.getElementById("graficoError");
+        errorDiv.style.display = "block";
+        errorDiv.textContent = "Erro ao carregar dados. Tente novamente.";
+      }
+    }
+
+    // Inicialização
+    document.addEventListener('DOMContentLoaded', function() {
+      atualizarTudo();
+      setInterval(atualizarTudo, 60000); // Atualiza a cada 1 minuto
+    });
+  </script>
+</body>
+</html>
